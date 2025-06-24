@@ -1,0 +1,22 @@
+{
+    "flutter": {
+        "platforms": {
+            "android": {
+                "default": {
+                    "projectId": "smarter-neet-mobile",
+                    "appId": "1:407158735215:android:83f83721ea67f1a59ca89a",
+                    "fileOutput": "android/app/google-services.json"
+                }
+            },
+            "dart": {
+                "lib/firebase_options.dart": {
+                    "projectId": "smarter-neet-mobile",
+                    "configurations": {
+                        "android": "1:407158735215:android:83f83721ea67f1a59ca89a",
+                        "web": "1:407158735215:web:2a279b50db36b46c9ca89a"
+                    }
+                }
+            }
+        }
+    }
+}
