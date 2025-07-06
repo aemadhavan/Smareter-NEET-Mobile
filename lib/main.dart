@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'package:clerk_flutter/clerk_flutter.dart';
+import 'package:myapp/signin_screen.dart'; // Import your sign-in screen
+import 'package:myapp/signup_screen.dart'; // Import your sign-up screen
 
 void main() {
+  // Ensure Flutter binding is initialized before runApp
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(
     const SmaretneetApp(
       publishableKey:
@@ -31,10 +35,38 @@ class SmaretneetApp extends StatelessWidget {
             child: ClerkErrorListener(
               child: ClerkAuthBuilder(
                 signedInBuilder: (context, authState) {
-                  return const ClerkUserButton();
+                  return Column(
+                    children: <Widget>[const Text('Welcome Home!')],
+                  );
                 },
                 signedOutBuilder: (context, authState) {
-                  return const ClerkAuthentication();
+                  return Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => SignInScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text('Sign In'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => SignUpScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text('Sign Up'),
+                      ),
+                    ],
+                  );
                 },
               ),
             ),
