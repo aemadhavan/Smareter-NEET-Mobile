@@ -34,6 +34,7 @@ dependencies:
   clerk_auth: ^0.0.9-beta
   logging: ^1.2.0
   shared_preferences: ^2.2.2
+  path_provider: ^2.1.1
 
   firebase_core: any
   # The following adds the Cupertino Icons font to your application.

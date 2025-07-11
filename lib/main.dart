@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:clerk_flutter/clerk_flutter.dart';
 import 'package:myapp/signin_screen.dart'; // Import your sign-in screen
 import 'package:myapp/signup_screen.dart'; // Import your sign-up screen
+import 'package:myapp/practice_page.dart'; // Import practice page
 
 void main() {
   // Ensure Flutter binding is initialized before runApp
@@ -35,9 +36,7 @@ class SmaretneetApp extends StatelessWidget {
             child: ClerkErrorListener(
               child: ClerkAuthBuilder(
                 signedInBuilder: (context, authState) {
-                  return Column(
-                    children: <Widget>[const Text('Welcome Home!')],
-                  );
+                  return const PracticePage();
                 },
                 signedOutBuilder: (context, authState) {
                   return Column(

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
+import 'package:logging/logging.dart';
+import 'package:myapp/subject_details_screen.dart';
+import 'package:myapp/config.dart';
+import 'package:myapp/network_debug.dart';
 
 class PracticePage extends StatefulWidget {
   const PracticePage({super.key});
@@ -12,12 +15,13 @@ class PracticePage extends StatefulWidget {
 }
 
 class PracticePageState extends State<PracticePage> {
+  static final _logger = Logger('PracticePage');
   List<dynamic> subjects = [];
   bool isLoading = true;
   String? errorMessage;
   bool isFromCache = false;
   int retryCount = 0;
-  final maxRetries = 5;
+  final maxRetries = AppConfig.maxRetries;
 
   // Static fallback data for emergency cases
   final List<Map<String, dynamic>> fallbackSubjects = [
@@ -50,6 +54,12 @@ class PracticePageState extends State<PracticePage> {
   @override
   void initState() {
     super.initState();
+    
+    // Log platform information for debugging
+    if (AppConfig.enableApiLogging) {
+      NetworkDebug.logPlatformInfo();
+    }
+    
     fetchSubjectsWithAdvancedRetry();
   }
 
@@ -70,7 +80,7 @@ class PracticePageState extends State<PracticePage> {
           final jitter = Random().nextInt(1000); // Add randomness
           final totalDelay = delay + jitter;
           
-          print('Retrying in ${totalDelay}ms... (attempt ${attempt + 1}/$maxRetries)');
+          _logger.info('Retrying in ${totalDelay}ms... (attempt ${attempt + 1}/$maxRetries)');
           await Future.delayed(Duration(milliseconds: totalDelay));
         }
 
@@ -88,7 +98,7 @@ class PracticePageState extends State<PracticePage> {
         }
         
       } catch (e) {
-        print('Attempt ${attempt + 1} failed: $e');
+        _logger.warning('Attempt ${attempt + 1} failed: $e');
         if (attempt == maxRetries - 1) {
           _useFallbackData();
         }
@@ -97,29 +107,45 @@ class PracticePageState extends State<PracticePage> {
   }
 
   Future<bool> _attemptApiCall() async {
-    final url = Uri.parse('https://www.dev.smarterneet.com/api/subjects');
+    final url = Uri.parse('${AppConfig.apiBaseUrl}${AppConfig.subjectsEndpoint}');
     
     try {
       // Generate unique client ID for this session
       final clientId = 'flutter-${DateTime.now().millisecondsSinceEpoch}';
       
-      final response = await http.get(
-        url,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'SmarterNEET-Mobile/1.0 (Flutter; ${Platform.operatingSystem})',
-          'X-Client-ID': clientId,
-          'Cache-Control': 'max-age=300', // Accept 5-minute cached responses
-          'Accept-Encoding': 'gzip, deflate',
-        },
-      ).timeout(const Duration(seconds: 30));
+      // Build headers for mobile API requests (backend bypasses auth for mobile)
+      final headers = <String, String>{
+        'User-Agent': 'SmarterNEET-Mobile/1.0.0 (Mobile)',
+        'Accept': 'application/json',
+        'X-Client-ID': clientId,
+        'x-vercel-protection-bypass': AppConfig.vercelBypassSecret,
+        'Cache-Control': 'max-age=300',
+        'Accept-Encoding': 'gzip, deflate',
+      };
+      
+      _logger.info('Using mobile-optimized headers with Vercel bypass');
+      
+      final response = await http.get(url, headers: headers)
+          .timeout(AppConfig.requestTimeout);
 
-      print('Response: ${response.statusCode}');
+      _logger.info('API Response: ${response.statusCode}');
+      
+      if (AppConfig.enableApiLogging) {
+        _logger.info('Response headers: ${response.headers}');
+        _logger.info('Content-Length: ${response.headers['content-length'] ?? 'unknown'}');
+      }
       
       if (response.statusCode == 200) {
         final contentType = response.headers['content-type'] ?? '';
+        
+        // Check for security checkpoint (HTML response)
+        if (contentType.contains('text/html')) {
+          _logger.warning('Security checkpoint detected - HTML response received');
+          return false;
+        }
+        
         if (!contentType.contains('application/json')) {
-          print('Invalid content type: $contentType');
+          _logger.warning('Invalid content type: $contentType');
           return false;
         }
 
@@ -137,42 +163,58 @@ class PracticePageState extends State<PracticePage> {
               isFromCache = decodedData['source'] == 'cache';
             });
             
-            print('Successfully loaded ${subjects.length} subjects (source: ${decodedData['source']})');
+            _logger.info('Successfully loaded ${subjects.length} subjects (source: ${decodedData['source']})');
             return true;
           } else {
-            print('Invalid response format');
+            _logger.warning('Invalid response format');
             return false;
           }
         } catch (jsonError) {
-          print('JSON parsing error: $jsonError');
+          _logger.severe('JSON parsing error: $jsonError');
+          _logger.severe('Raw response body: ${response.body.substring(0, 500)}');
           return false;
         }
       } else if (response.statusCode == 429) {
-        // Rate limited - check for Retry-After header
+        // Vercel Security Checkpoint detected
+        _logger.warning('Vercel Security Checkpoint detected (429). Implementing bypass strategy...');
+        
         final retryAfter = response.headers['retry-after'];
-        if (retryAfter != null) {
-          final waitTime = int.tryParse(retryAfter) ?? 5;
-          print('Rate limited. Server says wait ${waitTime}s');
-          await Future.delayed(Duration(seconds: waitTime));
-        }
+        final waitTime = retryAfter != null ? int.tryParse(retryAfter) ?? 10 : 10;
+        
+        _logger.info('Waiting ${waitTime}s before retry with enhanced headers...');
+        await Future.delayed(Duration(seconds: waitTime));
         return false;
       } else if (response.statusCode >= 500) {
         // Server error - worth retrying
-        print('Server error: ${response.statusCode}');
+        _logger.warning('Server error: ${response.statusCode}');
         return false;
       } else {
-        // Client error (4xx) - probably not worth retrying except 429
-        print('Client error: ${response.statusCode}');
+        // Client error (4xx) - log details for debugging
+        _logger.warning('Client error: ${response.statusCode}');
+        _logger.warning('Error response body: ${response.body}');
+        _logger.warning('Error response headers: ${response.headers}');
         return false;
       }
     } catch (e) {
-      print('Network error: $e');
+      _logger.severe('Network error: $e');
+      
+      // Log specific error types for better debugging
+      if (e.toString().contains('SocketException')) {
+        _logger.severe('Network connectivity issue - check internet connection');
+      } else if (e.toString().contains('TimeoutException')) {
+        _logger.severe('Request timeout - server may be slow or unreachable');
+      } else if (e.toString().contains('HandshakeException')) {
+        _logger.severe('SSL/TLS handshake failed - check certificate configuration');
+      } else if (e.toString().contains('HttpException')) {
+        _logger.severe('HTTP protocol error - check API endpoint and headers');
+      }
+      
       return false;
     }
   }
 
   void _useFallbackData() {
-    print('Using fallback data');
+    _logger.info('Using fallback data');
     setState(() {
       subjects = fallbackSubjects;
       isLoading = false;
@@ -184,6 +226,58 @@ class PracticePageState extends State<PracticePage> {
   Future<void> refresh() async {
     retryCount = 0;
     await fetchSubjectsWithAdvancedRetry();
+  }
+  
+  /// Run comprehensive network diagnostic for troubleshooting
+  Future<void> _runNetworkDiagnostic() async {
+    _logger.info('Running network diagnostic...');
+    
+    // Build the same headers used for API requests
+    final headers = <String, String>{
+      'User-Agent': AppConfig.userAgent,
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Content-Type': 'application/json',
+      'X-Client-ID': 'flutter-diagnostic-${DateTime.now().millisecondsSinceEpoch}',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    };
+    
+    if (AppConfig.vercelBypassSecret.isNotEmpty) {
+      headers['x-vercel-protection-bypass'] = AppConfig.vercelBypassSecret;
+      headers['x-vercel-set-bypass-cookie'] = 'true';
+    }
+    
+    final apiUrl = '${AppConfig.apiBaseUrl}${AppConfig.subjectsEndpoint}';
+    
+    try {
+      final diagnostic = await NetworkDebug.runFullDiagnostic(apiUrl, headers);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              diagnostic['apiTest']['success'] 
+                  ? 'Network diagnostic: All tests passed ✅'
+                  : 'Network diagnostic: Issues detected ❌ Check logs'
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      _logger.severe('Network diagnostic failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Network diagnostic failed - check logs'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -204,6 +298,12 @@ class PracticePageState extends State<PracticePage> {
             ),
           if (isFromCache)
             const Icon(Icons.cloud_off, color: Colors.orange),
+          if (AppConfig.enableApiLogging)
+            IconButton(
+              icon: const Icon(Icons.bug_report),
+              onPressed: isLoading ? null : _runNetworkDiagnostic,
+              tooltip: 'Run Network Diagnostic',
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: isLoading ? null : refresh,
@@ -327,8 +427,15 @@ class PracticePageState extends State<PracticePage> {
                               ),
                               trailing: const Icon(Icons.arrow_forward_ios),
                               onTap: () {
-                                print('Selected subject: ${subject['subject_name']}');
-                                // TODO: Navigate to subject details
+                                _logger.info('Selected subject: ${subject['subject_name']}');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => SubjectDetailsScreen(
+                                      subject: subject,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                           );
